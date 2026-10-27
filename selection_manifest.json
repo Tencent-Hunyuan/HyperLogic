@@ -1,0 +1,31 @@
+{
+  "selection": "Uniform random sample without replacement of whole items, independently per tier",
+  "fraction": 0.3,
+  "rounding": "ceil(total_items * fraction)",
+  "seed": 2027,
+  "ordering": "Seed: content-derived id; Base/Hard: integer id",
+  "random_generator": "Python random.Random(f'{seed}:{tier}').sample(range(n), k)",
+  "tiers": {
+    "seed": {
+      "full_items": 228,
+      "public_items": 69,
+      "public_subquestions": 69,
+      "full_canonical_sha256": "e142c69110f80ae3ffc2f2518fa32ac84cbbe8761f54c27006a6929aed1d6624",
+      "public_canonical_sha256": "09745b34e2a97b6225a792d80b4d4a34ca1a206dabd235073aca13b7f817946b"
+    },
+    "base": {
+      "full_items": 195,
+      "public_items": 59,
+      "public_subquestions": 274,
+      "full_canonical_sha256": "21a1a0dc905eb9a9f1d7ce085411af315b16ad586ed14cf3caab9fa9ac4da918",
+      "public_canonical_sha256": "32053a1def07536e6bf7d0b720d479c3ba66d1df80cdcb43984fab3705ee77ee"
+    },
+    "hard": {
+      "full_items": 100,
+      "public_items": 30,
+      "public_subquestions": 30,
+      "full_canonical_sha256": "f12b446c6446bd22164d6a3c666ffddcfe78819e951f1b28edb266320a640209",
+      "public_canonical_sha256": "c621ef5d13ef000b2d237fd9ebd0144f20d944649e853f78e9ec003f89214410"
+    }
+  }
+}
