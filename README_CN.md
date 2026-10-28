@@ -37,7 +37,7 @@
 
 ## 🔥 新闻
 
-- **2026.10.27**：💻 本仓库与 [Hugging Face 数据集](https://huggingface.co/datasets/tencent/HyperLogic) 公开，包括三层各约 30% 的题目及标准答案、直接作答提示词与判分脚本，以及完整的 Hard 层 agent 评测（两种沙盒条件、原样题面和逻辑建模库）。
+- **2026.10.28**：💻 本仓库与 [Hugging Face 数据集](https://huggingface.co/datasets/tencent/HyperLogic) 公开，包括三层各约 30% 的题目及标准答案、直接作答提示词与判分脚本，以及完整的 Hard 层 agent 评测（两种沙盒条件、原样题面和逻辑建模库）。
 - **2026.10.02**：🎉 论文以 HyperLogic 为题发布于 arXiv（arXiv:2605.19597 第 2 版）：HyperLogic-Base 含 195 题、922 小问，HyperLogic-Hard 含 100 题，并给出 7 个前沿模型的评测结果。[[论文]](https://arxiv.org/abs/2605.19597)
 
 ## 📋 目录

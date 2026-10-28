@@ -37,7 +37,7 @@
 
 ## 🔥 News
 
-- **2026.10.27**: 💻 This repository and the [Hugging Face dataset](https://huggingface.co/datasets/tencent/HyperLogic) go public with about 30% of the items of every tier, their gold answers, the direct-answer prompt and scorer, and the complete Hard agent evaluation (both sandbox conditions, their exact payloads, and the logic modeling library).
+- **2026.10.28**: 💻 This repository and the [Hugging Face dataset](https://huggingface.co/datasets/tencent/HyperLogic) go public with about 30% of the items of every tier, their gold answers, the direct-answer prompt and scorer, and the complete Hard agent evaluation (both sandbox conditions, their exact payloads, and the logic modeling library).
 - **2026.10.02**: 🎉 The paper is released on arXiv as HyperLogic (v2 of arXiv:2605.19597) — HyperLogic-Base with 195 items and 922 sub-questions, HyperLogic-Hard with 100 items, and results for 7 frontier models. [[Paper]](https://arxiv.org/abs/2605.19597)
 
 ## 📋 Contents
