@@ -12,17 +12,25 @@ Python does: `eval_core` writes `and` as ``all(...)`` over a generator, so a
 later conjunct is only evaluated when every earlier one was true, and the
 encoding says exactly that.
 
-*Value identity.*  `eval_core` compares with Python ``==``, so ``True == 1``.
-Integers therefore represent themselves -- including booleans, since ``bool`` is
-an ``int`` subclass -- and only genuinely non-numeric values get synthetic ids
-above ``_CAT_BASE``.  Mapping ``True`` to a separate categorical id would make
-this backend disagree with the oracle on ``eq(count_of(...), True)``.
+*Value identity.*  `eval_core` compares with Python ``==``, so ``True == 1`` and
+``1 == 1.0``.  Integers therefore represent themselves -- including booleans,
+since ``bool`` is an ``int`` subclass, and integral floats, which encode as the
+integer they equal -- and every other value gets a synthetic categorical id.
+Mapping ``True`` to a separate categorical id would make this backend disagree
+with the oracle on ``eq(count_of(...), True)``.
 
-Because categorical ids are arbitrary, an ordering comparison over them would be
-meaningless: `eval_core` would compare two strings lexicographically while Z3
-compared two invented integers.  `lt`/`le` are therefore encoded only when both
-operands are provably integer-valued, and otherwise raise
-`UnsupportedByBackend` so the caller can fall back to the oracle.
+The two kinds share one integer line, so categorical ids start above every
+integer the model can produce -- its literals, and what ``sum_of``,
+``count_of`` and ``rank_of`` reach from them (`_Compiler._model_int_bound`) --
+and never below ``_CAT_BASE``.  A fixed base is not enough: a domain value equal
+to it would be the first category.  A term or literal compiled later, by a
+query, that reaches the base raises `UnsupportedByBackend` instead.
+
+Because categorical ids are arbitrary, arithmetic and order over them would be
+meaningless: `eval_core` would add two floats or compare two strings while Z3
+added or compared two invented integers.  `sum_of`, `lt` and `le` are therefore
+encoded only when their operands are provably integer-valued, and otherwise
+raise `UnsupportedByBackend` so the caller can fall back to the oracle.
 """
 
 from __future__ import annotations
@@ -74,8 +82,24 @@ TermPair = Tuple[z3.BoolRef, z3.ArithRef]
 FormPair = Tuple[z3.BoolRef, z3.BoolRef]
 
 
+def _int_literal(value: Any) -> Optional[int]:
+    """The integer a value equals under Python ``==``, if it is such a number."""
+    if isinstance(value, int):  # bool included on purpose: True == 1
+        return int(value)
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return None
+
+
+def _values_info(values: Sequence[Any]) -> Tuple[bool, int]:
+    """(all integer-valued, largest integer magnitude) of literal values."""
+    numbers = [_int_literal(v) for v in values]
+    return (all(n is not None for n in numbers),
+            max((abs(n) for n in numbers if n is not None), default=0))
+
+
 def _all_ints(domain: Optional[Sequence[Any]]) -> bool:
-    return domain is not None and all(isinstance(v, int) for v in domain)
+    return domain is not None and _values_info(domain)[0]
 
 
 class _Compiler:
@@ -83,8 +107,11 @@ class _Compiler:
 
     def __init__(self, model: Model) -> None:
         self.model = model
+        self._info_cache: Dict[int, Tuple[Node, Tuple[bool, int]]] = {}
+        self._info_in_progress: Set[str] = set()
         self._cat: Dict[Any, int] = {}
-        self._next_cat = _CAT_BASE
+        self._cat_base = max(_CAT_BASE, self._model_int_bound() + 1)
+        self._next_cat = self._cat_base
         self.var: Dict[str, z3.ArithRef] = {}
         self.domain_ids: Dict[str, List[int]] = {}
         self._derived: Dict[str, TermPair] = {}
@@ -109,8 +136,15 @@ class _Compiler:
     # -- value identity --------------------------------------------------
     def vid(self, value: Any) -> int:
         """Integer code for a value, matching Python's own equality."""
-        if isinstance(value, int):  # bool included on purpose: True == 1
-            return int(value)
+        number = _int_literal(value)
+        if number is not None:
+            if number >= self._cat_base:
+                raise UnsupportedByBackend(
+                    f"integer {number} reaches this model's categorical ids, which start "
+                    f"at {self._cat_base}, above every integer the model itself produces; "
+                    "a value brought in by a query would alias a category"
+                )
+            return number
         try:
             key: Any = value
             hash(key)
@@ -123,6 +157,87 @@ class _Compiler:
 
     def val(self, value: Any) -> z3.ArithRef:
         return z3.IntVal(self.vid(value))
+
+    def _term_info(self, node: Node) -> Tuple[bool, int]:
+        """(only ever integer-valued, bound on the magnitude of its integer values)."""
+        if node.kind == "formula":
+            return True, 1
+        key = id(node)
+        hit = self._info_cache.get(key)
+        if hit is not None:
+            return hit[1]
+        op = node.op
+        if op == "const":
+            info = _values_info([node.args[0]])
+        elif op == "ref":
+            name = node.args[0]
+            if name in self.model.vars:
+                info = _values_info(self.model.vars[name].domain)
+            elif name in self.model.derived and name not in self._info_in_progress:
+                self._info_in_progress.add(name)
+                try:
+                    info = self._term_info(self.model.derived[name].expr)
+                finally:
+                    self._info_in_progress.discard(name)
+            else:  # a circular derive is always undefined, and an unknown name never compiles
+                info = (True, 0)
+        elif op == "elem":
+            info = _values_info([v for _, v in node.args[0]])
+        elif op == "count_of":
+            info = (True, len(node.args[0]))
+        elif op == "sum_of":
+            parts = [self._term_info(t) for t in node.args[0]]
+            info = (all(p[0] for p in parts), sum(p[1] for p in parts))
+        elif op == "complement":
+            info = _values_info(node.args[0])
+        elif op == "ite":
+            then, other = self._term_info(node.args[1]), self._term_info(node.args[2])
+            info = (then[0] and other[0], max(then[1], other[1]))
+        elif op == "select_unique":
+            _, labels, default = node.args
+            info = _values_info(list(labels) + [default])
+        elif op == "rank_of":
+            info = (True, max(len(node.args[1]) - 1, 0))
+        else:
+            info = (False, 0)
+        self._info_cache[key] = (node, info)
+        return info
+
+    def _model_int_bound(self) -> int:
+        """Largest integer magnitude this model can produce, every literal included.
+
+        Literals count even where they are not a term's value: an `in_set` member
+        or an `elem` key is compared with a term, so it needs an id no category
+        shares.
+        """
+        bound = 0
+        stack: List[Any] = [decl.domain for decl in self.model.vars.values()]
+        for derived in self.model.derived.values():
+            stack.append(derived.expr)
+            if derived.domain:
+                stack.append(derived.domain)
+        for constraint in self.model.constraints:
+            stack.append(constraint.expr)
+            if constraint.unless is not None:
+                stack.append(constraint.unless)
+        seen: Set[int] = set()
+        while stack:
+            item = stack.pop()
+            if isinstance(item, Node):
+                if id(item) in seen:
+                    continue
+                seen.add(id(item))
+                if item.kind == "term":
+                    bound = max(bound, self._term_info(item)[1])
+                if item.op != "ref":  # its argument is a name, not a value
+                    stack.extend(item.args)
+            elif isinstance(item, tuple):
+                stack.extend(item)
+            else:
+                number = _int_literal(item)
+                if number is not None:
+                    bound = max(bound, abs(number))
+        return bound
 
     def inverse(self) -> Dict[int, Any]:
         out: Dict[int, Any] = {}
@@ -152,6 +267,12 @@ class _Compiler:
         key = id(node)
         hit = self._term_cache.get(key)
         if hit is None:
+            reach = self._term_info(node)[1]
+            if reach >= self._cat_base:
+                raise UnsupportedByBackend(
+                    f"{node.op!r} can reach {reach}, at or past this model's categorical "
+                    f"ids (from {self._cat_base}), so a value of it could alias a category"
+                )
             pair = self._term(node)
             self._term_cache[key] = (node, pair)
             return pair
@@ -198,6 +319,11 @@ class _Compiler:
             value = z3.Sum([z3.If(b, 1, 0) for _, b in pairs]) if pairs else z3.IntVal(0)
             return defined, value
         if op == "sum_of":
+            if not all(self._term_info(t)[0] for t in node.args[0]):
+                raise UnsupportedByBackend(
+                    "'sum_of' over a non-integer term: categorical ids are not numbers, "
+                    "and eval_core would add the values themselves."
+                )
             pairs = [self.term(t) for t in node.args[0]]
             defined = z3.And([d for d, _ in pairs]) if pairs else T
             value = z3.Sum([v for _, v in pairs]) if pairs else z3.IntVal(0)
